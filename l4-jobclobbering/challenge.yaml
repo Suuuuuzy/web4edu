@@ -1,0 +1,140 @@
+apiVersion: kube-ctf.downunderctf.com/v1
+kind: IsolatedChallenge
+metadata:
+  name: jobclobbering
+spec:
+  expires: 1800
+  available_at: 1600000000
+  type: web
+  template: |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: "ctf-{{ deployment_id }}"
+      namespace: kubectf-challenges-isolated
+      labels:
+        kube-ctf.downunderctf.com/type: web
+        kube-ctf.downunderctf.com/name: jobclobbering
+        isolated-challenge.kube-ctf.downunderctf.com/deployment: "{{ deployment_id }}"
+        isolated-challenge.kube-ctf.downunderctf.com/owner: "{{ owner_id }}"
+      annotations:
+        janitor/expires: "{{ expires }}"
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          isolated-challenge.kube-ctf.downunderctf.com/deployment: "{{ deployment_id }}"
+          isolated-challenge.kube-ctf.downunderctf.com/owner: "{{ owner_id }}"
+      template:
+        metadata:
+          labels:
+            role: web
+            kube-ctf.downunderctf.com/type: web
+            kube-ctf.downunderctf.com/name: jobclobbering
+            isolated-challenge.kube-ctf.downunderctf.com/deployment: "{{ deployment_id }}"
+            isolated-challenge.kube-ctf.downunderctf.com/owner: "{{ owner_id }}"
+        spec:
+          enableServiceLinks: false
+          automountServiceAccountToken: false
+          containers:
+          - name: web
+            image: us-east4-docker.pkg.dev/web-security-2025-fall/chall/jobclobbering:latest
+            env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "8399"
+            resources:
+              limits:
+                cpu: 500m
+                memory: 1Gi
+              requests:
+                cpu: 20m
+                memory: 256Mi
+            ports:
+            - containerPort: 8399
+              name: port-8399
+            livenessProbe:
+              httpGet:
+                path: /
+                port: 8399
+              initialDelaySeconds: 30
+              periodSeconds: 10
+            readinessProbe:
+              httpGet:
+                path: /
+                port: 8399
+              initialDelaySeconds: 5
+              periodSeconds: 5
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 1337
+              runAsGroup: 1337
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                  - ALL
+                add:
+                  - SYS_ADMIN  # Required for Chrome/Puppeteer
+            volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: dev-shm
+              mountPath: /dev/shm
+          volumes:
+          - name: tmp
+            emptyDir:
+              sizeLimit: 1Gi
+          - name: dev-shm
+            emptyDir:
+              medium: Memory
+              sizeLimit: 2Gi
+          securityContext:
+            fsGroup: 1337
+    ---
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: "ctf-{{ deployment_id }}"
+      namespace: kubectf-challenges-isolated
+      labels:
+        kube-ctf.downunderctf.com/type: web
+        kube-ctf.downunderctf.com/name: jobclobbering
+        isolated-challenge.kube-ctf.downunderctf.com/deployment: "{{ deployment_id }}"
+        isolated-challenge.kube-ctf.downunderctf.com/owner: "{{ owner_id }}"
+      annotations:
+        janitor/expires: "{{ expires }}"
+    spec:
+      selector:
+        role: web
+        isolated-challenge.kube-ctf.downunderctf.com/deployment: "{{ deployment_id }}"
+      ports:
+        - port: 80
+          targetPort: 8399
+          name: port-8399
+    ---
+    apiVersion: traefik.io/v1alpha1
+    kind: IngressRoute
+    metadata:
+      name: ingress-ctf-{{ deployment_id }}
+      namespace: kubectf-challenges-isolated
+      labels:
+        kube-ctf.downunderctf.com/type: web
+        kube-ctf.downunderctf.com/name: jobclobbering
+        isolated-challenge.kube-ctf.downunderctf.com/deployment: "{{ deployment_id }}"
+        isolated-challenge.kube-ctf.downunderctf.com/owner: "{{ owner_id }}"
+      annotations:
+        janitor/expires: "{{ expires }}"
+    spec:
+      entryPoints:
+        - web
+        - websecure
+      tls:
+        certResolver: default
+      routes:
+        - match: Host(`{{ deployment_id }}.{{ domain }}`)
+          kind: Rule
+          priority: 10
+          services:
+          - name: ctf-{{ deployment_id }}
+            port: 80
